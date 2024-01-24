@@ -7,7 +7,6 @@ const jwt = require("jsonwebtoken");
 
 const router = express.Router();
 const Student = require("../schemas/student");
-const Message = require("../schemas/message");
 
 router.post("/signup", async (req, res) => {
   const file = req.files.image;

@@ -34,6 +34,7 @@ const doctorTabRouter = require("./routes/doctor-tabs");
 
 const facultiesRouter = require("./routes/faculties");
 const timeslotsRouter = require("./routes/timeslots");
+const diseasesRouter = require("./routes/diseases");
 
 // set routes
 app.use("/students", studentsRouter);
@@ -43,6 +44,7 @@ app.use("/tabs/doctors", doctorTabRouter);
 
 app.use("/faculties", facultiesRouter);
 app.use("/timeslots", timeslotsRouter);
+app.use("/diseases", diseasesRouter);
 
 app.listen(config.port, config.hostname, () => {
   console.log(`Server is running on http://${config.hostname}:${config.port}`);

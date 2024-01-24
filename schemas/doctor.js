@@ -52,11 +52,6 @@ const doctorSchema = new mongoose.Schema(
       minlength: 8,
       maxlength: 50,
     },
-    address: {
-      type: String,
-      required: true,
-      maxlength: 200,
-    },
     bio: {
       type: String,
       required: true,
@@ -108,7 +103,7 @@ doctorSchema.pre("save", function (next) {
   if (this.isModified("password")) {
     this.password = md5(this.password);
   }
-  this.image = `${config.studentDocLink}/${this._id}.jpg`;
+  this.image = `${config.doctorDocLink}/${this._id}.jpg`;
   next();
 });
 

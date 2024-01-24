@@ -8,10 +8,6 @@ const appointmentSchema = new mongoose.Schema({
     ref: "Student",
     required: true,
   },
-  date: {
-    type: Date,
-    required: true,
-  },
   startTime: {
     type: Date,
     required: true,

@@ -194,7 +194,7 @@ router.post("/emergency/send-message", verifyJWT, async (req, res) => {
 
 router.get("/appointments", verifyJWT, async (req, res) => {
   try {
-    const now = dayjs();
+    const now = new Date();
 
     const upcomingAppointments = await Appointment.find({
       studentId: req.student._id,
@@ -235,9 +235,10 @@ router.put("/appointments/add", verifyJWT, async (req, res) => {
   date = date.startOf("day");
 
   try {
+    // check upcomming appointments
     const upcomingAppointments = await Appointment.find({
       studentId: req.student._id,
-      startTime: { $gte: dayjs() },
+      startTime: { $gte: new Date() },
     });
 
     if (upcomingAppointments.length >= 3) {
@@ -247,6 +248,7 @@ router.put("/appointments/add", verifyJWT, async (req, res) => {
       });
     }
 
+    // check days difference
     if (date.diff(dayjs(), "days") > 20) {
       return res.status(ec.badReq).json({
         status: "warning",
@@ -283,9 +285,8 @@ router.put("/appointments/add", verifyJWT, async (req, res) => {
 
     const appointment = new Appointment({
       studentId: req.student._id,
-      date: date.format("YYYY-MM-DD"),
-      startTime: startTime,
-      endTime: endTime,
+      startTime: startTime.toDate(),
+      endTime: endTime.toDate(),
       description: description,
     });
     await appointment.save();
@@ -321,18 +322,25 @@ router.get("/appointments/free-slots", async (req, res) => {
     });
   }
 
-  date = date.startOf("day");
-  const nowMinutes = timeToMinutes(dayjs().format());
+  const startDate = date.startOf("day");
+  const endDate = date.endOf("day");
+  const nowMinutes = timeToMinutes(new Date());
 
   try {
     const appointments = await Appointment.find({
-      date: { $eq: date.format("YYYY-MM-DD") },
+      startTime: {
+        $gte: startDate.toDate(),
+        $lte: endDate.toDate(),
+      },
     });
 
     let timeSlots;
-    if (date.isToday())
+
+    if (date.isToday()) {
       timeSlots = await TimeSlot.find({ startTime: { $gte: nowMinutes } });
-    else timeSlots = await TimeSlot.find({});
+    } else {
+      timeSlots = await TimeSlot.find({});
+    }
 
     let freeSlots = [];
 

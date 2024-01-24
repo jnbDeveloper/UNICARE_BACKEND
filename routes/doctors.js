@@ -6,9 +6,7 @@ const md5 = require("js-md5");
 const jwt = require("jsonwebtoken");
 
 const router = express.Router();
-const Student = require("../schemas/student");
 const Doctor = require("../schemas/doctor");
-const Message = require("../schemas/message");
 
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
@@ -125,7 +123,7 @@ router.post("/change-dp", verifyJWT, (req, res) => {
     });
   }
 
-  const path = `${config.studentDoc}/${req.doctor._id}.jpg`;
+  const path = `${config.doctorDoc}/${req.doctor._id}.jpg`;
 
   file.mv(path, (error) => {
     if (error) {
@@ -141,6 +139,73 @@ router.post("/change-dp", verifyJWT, (req, res) => {
     status: "success",
     message: "Profile picture changed successful.",
   });
+});
+
+router.put("/update-general", verifyJWT, async (req, res) => {
+  const { firstName, lastName, gender, birthday, phone, email, bio } = req.body;
+
+  try {
+    req.doctor.firstName = firstName;
+    req.doctor.lastName = lastName;
+    req.doctor.gender = gender;
+    req.doctor.birthday = birthday;
+    req.doctor.phone = phone;
+    req.doctor.email = email;
+    req.doctor.bio = bio;
+
+    await req.doctor.save();
+
+    res.json({
+      status: "success",
+      message: "General information updated successful.",
+      doctor: req.doctor,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      res.status(ec.badReq).json({
+        status: "warning",
+        message: "Invalid user inputs, please check your data and try again.",
+        error: error.message,
+      });
+    } else {
+      res.status(ec.serverError).json({
+        status: "error",
+        message: "Update failed, please try again later.",
+        error: error.message,
+      });
+    }
+  }
+});
+
+router.put("/update-pro", verifyJWT, async (req, res) => {
+  const { mcRegNo, specialize } = req.body;
+
+  try {
+    req.doctor.mcRegNo = mcRegNo;
+    req.doctor.specialize = specialize;
+
+    await req.doctor.save();
+
+    res.json({
+      status: "success",
+      message: "Professional information updated successful.",
+      doctor: req.doctor,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      res.status(ec.badReq).json({
+        status: "warning",
+        message: "Invalid user inputs, please check your data and try again.",
+        error: error.message,
+      });
+    } else {
+      res.status(ec.serverError).json({
+        status: "error",
+        message: "Update failed, please try again later.",
+        error: error.message,
+      });
+    }
+  }
 });
 
 router.put("/change-password", verifyJWT, async (req, res) => {
@@ -185,139 +250,6 @@ router.put("/change-password", verifyJWT, async (req, res) => {
   }
 });
 
-router.put("/update-general", verifyJWT, async (req, res) => {
-  const { firstName, lastName, gender, birthday, phone, email, address, bio } =
-    req.body;
-
-  try {
-    req.doctor.firstName = firstName;
-    req.doctor.lastName = lastName;
-    req.doctor.gender = gender;
-    req.doctor.birthday = birthday;
-    req.doctor.phone = phone;
-    req.doctor.email = email;
-    req.doctor.address = address;
-    req.doctor.bio = bio;
-
-    await req.doctor.save();
-
-    res.json({
-      status: "success",
-      message: "General information updated successful.",
-      student: req.doctor,
-    });
-  } catch (error) {
-    if (error.name === "ValidationError") {
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: "Invalid user inputs, please check your data and try again.",
-        error: error.message,
-      });
-    } else if (error.code === 11000) {
-      const duplicatedField = Object.keys(error.keyPattern)[0];
-      const field =
-        duplicatedField === "email"
-          ? "email"
-          : duplicatedField === "regNo"
-          ? "registration number"
-          : duplicatedField === "indexNo"
-          ? "index number"
-          : "phone number";
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: `You entered a ${field} that already exists.`,
-        error: error.message,
-      });
-    } else {
-      res.status(ec.serverError).json({
-        status: "error",
-        message: "Update failed, please try again later.",
-        error: error.message,
-      });
-    }
-  }
-});
-
-router.put("/update-reg", verifyJWT, async (req, res) => {
-  const { regNo, indexNo, faculty } = req.body;
-
-  try {
-    req.doctor.regNo = regNo;
-    req.doctor.indexNo = indexNo;
-    req.doctor.faculty = faculty;
-
-    await req.doctor.save();
-
-    res.json({
-      status: "success",
-      message: "Registration information updated successful.",
-      student: req.doctor,
-    });
-  } catch (error) {
-    if (error.name === "ValidationError") {
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: "Invalid user inputs, please check your data and try again.",
-        error: error.message,
-      });
-    } else if (error.code === 11000) {
-      const duplicatedField = Object.keys(error.keyPattern)[0];
-      const field =
-        duplicatedField === "email"
-          ? "email"
-          : duplicatedField === "regNo"
-          ? "registration number"
-          : duplicatedField === "indexNo"
-          ? "index number"
-          : "phone number";
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: `You entered a ${field} that already exists.`,
-        error: error.message,
-      });
-    } else {
-      res.status(ec.serverError).json({
-        status: "error",
-        message: "Update failed, please try again later.",
-        error: error.message,
-      });
-    }
-  }
-});
-
-router.put("/update-health", verifyJWT, async (req, res) => {
-  const { height, weight, bloodGroup, diseases } = req.body;
-
-  try {
-    req.doctor.height = height;
-    req.doctor.weight = weight;
-    req.doctor.bloodGroup = bloodGroup;
-    req.doctor.diseases = diseases;
-
-    await req.doctor.save();
-
-    res.json({
-      status: "success",
-      message: "Health information updated successful.",
-      student: req.doctor,
-    });
-  } catch (error) {
-    if (error.name === "ValidationError") {
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: "Invalid user inputs, please check your data and try again.",
-        error: error.message,
-      });
-    } else {
-      res.status(ec.serverError).json({
-        status: "error",
-        message: "Update failed, please try again later.",
-        error: error.message,
-      });
-    }
-  }
-});
-
 router.put("/update-token", verifyJWT, async (req, res) => {
   const { token } = req.body;
 
@@ -339,37 +271,6 @@ router.put("/update-token", verifyJWT, async (req, res) => {
       message: "Something went wrong.",
       error: error.message,
     });
-  }
-});
-
-router.post("/send-message", verifyJWT, async (req, res) => {
-  try {
-    const message = new Message({
-      text: req.body.text,
-      student: req.doctor._id,
-      from: "student",
-      to: "medical-centre",
-    });
-    await message.save();
-
-    res.json({
-      status: "success",
-      message: "Message sent successful.",
-    });
-  } catch (error) {
-    if (error.name === "ValidationError") {
-      res.status(ec.badReq).json({
-        status: "warning",
-        message: "Invalid user inputs, please check your data and try again.",
-        error: error.message,
-      });
-    } else {
-      res.status(ec.serverError).json({
-        status: "error",
-        message: "Message send failed, please try again later.",
-        error: error.message,
-      });
-    }
   }
 });
 
