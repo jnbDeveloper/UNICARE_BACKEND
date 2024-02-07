@@ -32,8 +32,10 @@ const sendNotification = async (
         Authorization: config.fcmServerKey,
       },
     });
-    return response.success > 0;
+    console.log("Fcm success:", response.data.success, response.data.failure);
+    return response.data.success > 0;
   } catch (error) {
+    console.log("Fcm error:", error.message);
     return false;
   }
 };
@@ -78,6 +80,220 @@ const verifyJWT = (req, res, next) => {
     });
   }
 };
+
+// #region home
+
+router.get("/home", verifyJWT, async (req, res) => {
+  const currentYear = parseInt(dayjs().format("YYYY"));
+
+  try {
+    const appointments = await Appointment.aggregate([
+      {
+        $match: {
+          startTime: { $gt: new Date() },
+        },
+      },
+      {
+        $lookup: {
+          from: "students",
+          localField: "studentId",
+          foreignField: "_id",
+          as: "student",
+          pipeline: [
+            {
+              $lookup: {
+                from: "faculties",
+                localField: "faculty",
+                foreignField: "_id",
+                as: "faculty",
+              },
+            },
+            {
+              $unwind: "$faculty",
+            },
+          ],
+        },
+      },
+      {
+        $unwind: "$student",
+      },
+      {
+        $sort: {
+          startTime: 1,
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          startTime: 1,
+          endTime: 1,
+          description: 1,
+          checked: 1,
+          checkedAt: 1,
+          createdAt: 1,
+          firstName: "$student.firstName",
+          lastName: "$student.lastName",
+          faculty: "$student.faculty.name",
+          image: "$student.image",
+        },
+      },
+      {
+        $limit: 4,
+      },
+    ]);
+
+    const graph = await Student.aggregate([
+      {
+        $lookup: {
+          from: "healthrecords",
+          localField: "_id",
+          foreignField: "studentId",
+          as: "records",
+        },
+      },
+      {
+        $lookup: {
+          from: "faculties",
+          localField: "faculty",
+          foreignField: "_id",
+          as: "faculty",
+        },
+      },
+      {
+        $unwind: "$records",
+      },
+      {
+        $unwind: "$faculty",
+      },
+      {
+        $group: {
+          _id: {
+            faculty: "$faculty",
+            year: { $year: "$records.createdAt" },
+          },
+          students: { $addToSet: "$_id" },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.faculty._id",
+          faculty: { $first: "$_id.faculty.name" },
+          years: {
+            $push: {
+              year: "$_id.year",
+              count: { $size: "$students" },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          faculty: 1,
+          years: {
+            $map: {
+              input: { $range: [currentYear - 4, currentYear + 1] },
+              as: "year",
+              in: {
+                year: "$$year",
+                count: {
+                  $cond: {
+                    if: { $in: ["$$year", "$years.year"] },
+                    then: {
+                      $let: {
+                        vars: {
+                          filteredYear: {
+                            $arrayElemAt: [
+                              {
+                                $filter: {
+                                  input: "$years",
+                                  as: "yearData",
+                                  cond: { $eq: ["$$yearData.year", "$$year"] },
+                                },
+                              },
+                              0,
+                            ],
+                          },
+                        },
+                        in: "$$filteredYear.count",
+                      },
+                    },
+                    else: 0,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    res.json({
+      status: "success",
+      appointments: appointments,
+      graph: graph,
+      online: req.doctor.online,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+router.put("/home/status", verifyJWT, async (req, res) => {
+  try {
+    const data = await Student.aggregate([
+      {
+        $match: { fcmToken: { $ne: null } },
+      },
+      {
+        $group: {
+          _id: "$fcmToken",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          fcmToken: "$_id",
+        },
+      },
+    ]);
+    const tokens = data.map((item) => item.fcmToken);
+
+    req.doctor.online = !req.doctor.online;
+    await req.doctor.save();
+
+    sendNotification({
+      registration_ids: tokens,
+      notification: {
+        title: req.doctor.online ? "Doctor Available" : "Doctor Not Available",
+        body: req.doctor.online
+          ? "Doctor is in the medical centre."
+          : "Doctor is not in the medical centre",
+      },
+      data: {
+        task: "online",
+      },
+    });
+
+    res.json({
+      status: "success",
+      message: "Online status changed successful.",
+      online: req.doctor.online,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
 
 // #region emergency
 
@@ -246,7 +462,12 @@ router.get("/emergency/search", verifyJWT, async (req, res) => {
           unreadMsgCount: {
             $sum: {
               $cond: {
-                if: { $eq: ["$message.seen", false] },
+                if: {
+                  $and: [
+                    { $eq: ["$seen", false] },
+                    { $eq: ["$from", "student"] },
+                  ],
+                },
                 then: 1,
                 else: 0,
               },
@@ -751,7 +972,13 @@ router.get("/check-patient/appointment", verifyJWT, async (req, res) => {
 
 router.put("/check-patient/add-record", verifyJWT, async (req, res) => {
   try {
-    const record = new HealthRecord(req.body);
+    const data = {
+      ...req.body,
+      doctorName: `${req.doctor.firstName} ${req.doctor.lastName}`,
+      doctorRegNo: req.doctor.mcRegNo,
+    };
+
+    const record = new HealthRecord(data);
     await record.save();
 
     if (req.body.appointmentId) {
@@ -782,6 +1009,124 @@ router.put("/check-patient/add-record", verifyJWT, async (req, res) => {
         error: error.message,
       });
     }
+  }
+});
+
+router.get("/check-patient/search", verifyJWT, async (req, res) => {
+  const { keyWord } = req.query;
+
+  try {
+    const students = await Student.aggregate([
+      {
+        $match: {
+          $or: [
+            { firstName: { $regex: keyWord, $options: "i" } },
+            { lastName: { $regex: keyWord, $options: "i" } },
+            { indexNo: { $regex: keyWord, $options: "i" } },
+            { regNo: { $regex: keyWord, $options: "i" } },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: "appointments",
+          localField: "_id",
+          foreignField: "studentId",
+          as: "appointments",
+        },
+      },
+      {
+        $lookup: {
+          from: "faculties",
+          localField: "faculty",
+          foreignField: "_id",
+          as: "faculty",
+        },
+      },
+      {
+        $unwind: {
+          path: "$appointments",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $unwind: "$faculty",
+      },
+      {
+        $group: {
+          _id: "$_id",
+          image: { $first: "$image" },
+          firstName: { $first: "$firstName" },
+          lastName: { $first: "$lastName" },
+          bio: { $first: "$bio" },
+          indexNo: { $first: "$indexNo" },
+          regNo: { $first: "$regNo" },
+          onGoingAppointments: {
+            $sum: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $lte: ["$startTime", new Date()] },
+                    { $gt: ["$endTime", new Date()] },
+                  ],
+                },
+                then: 1,
+                else: 0,
+              },
+            },
+          },
+          upcomingAppointments: {
+            $sum: {
+              $cond: {
+                if: { $gte: ["$startTime", new Date()] },
+                then: 1,
+                else: 0,
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    res.json({
+      status: "success",
+      students: students,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/check-patient/records", verifyJWT, async (req, res) => {
+  const { studentId } = req.query;
+
+  if (!studentId) {
+    return res.status(ec.badReq).json({
+      status: "warning",
+      message: "Invalid inputs.",
+      error: error.message,
+    });
+  }
+
+  try {
+    const records = await HealthRecord.find({
+      studentId: new mongoose.Types.ObjectId(studentId),
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      status: "success",
+      records: records,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
   }
 });
 

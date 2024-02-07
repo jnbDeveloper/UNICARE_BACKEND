@@ -6,6 +6,16 @@ const healthRecordSchema = new mongoose.Schema({
     ref: "Student",
     required: true,
   },
+  doctorName: {
+    type: String,
+    required: true,
+    maxlength: 60,
+  },
+  doctorRegNo: {
+    type: String,
+    required: true,
+    maxlength: 50,
+  },
   disease: {
     type: String,
     required: true,

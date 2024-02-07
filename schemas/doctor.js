@@ -84,6 +84,10 @@ const doctorSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    online: {
+      type: Boolean,
+      default: false,
+    },
     createdAt: {
       type: Date,
       immutable: true,
