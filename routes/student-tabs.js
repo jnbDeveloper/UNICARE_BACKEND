@@ -14,6 +14,9 @@ const Message = require("../schemas/message");
 const Doctor = require("../schemas/doctor");
 const Appointment = require("../schemas/appointment");
 const TimeSlot = require("../schemas/timeslot");
+const Notification = require("../schemas/notification");
+const Setting = require("../schemas/setting");
+const HealthRecord = require("../schemas/health-record");
 
 dayjs.extend(isToday);
 dayjs.extend(utc);
@@ -105,6 +108,72 @@ const isOverlap = (slot, appointment) => {
   }
 };
 
+// #region navigation drawer
+
+router.get("/", verifyJWT, async (req, res) => {
+  try {
+    const notifications = await Notification.find({
+      $and: [{ user: "student" }, { studentId: req.student._id }],
+    })
+      .limit(50)
+      .sort({ createdAt: 1 });
+
+    res.json({
+      status: "success",
+      student: req.student,
+      notifications: notifications,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+router.post("/notifications", verifyJWT, async (req, res) => {
+  try {
+    await Notification.deleteMany({
+      $and: [{ user: "student" }, { studentId: req.student._id }],
+    });
+
+    res.json({
+      status: "success",
+      message: "Notifications deleted successful.",
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
+
+// #region home
+
+router.get("/home", verifyJWT, async (req, res) => {
+  try {
+    const doctor = await Doctor.findOne();
+
+    res.json({
+      status: "success",
+      doctor: doctor,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
+
 // #region emergency
 
 router.get("/emergency", verifyJWT, async (req, res) => {
@@ -147,9 +216,21 @@ router.post("/emergency/send-message", verifyJWT, async (req, res) => {
     });
     await message.save();
 
-    const doctor = await Doctor.findOne({});
+    const settings = await Setting.findOne();
+    if (settings && settings.emergencyNotifications) {
+      const notification = new Notification({
+        type: "emergency",
+        user: "medical-centre",
+        name: `${req.student.firstName} ${req.student.lastName}`,
+        image: req.student.image,
+        title: "Emergency message",
+        content: req.body.text,
+      });
+      await notification.save();
+    }
 
-    if (doctor.fcmToken) {
+    const doctor = await Doctor.findOne({});
+    if (doctor && doctor.fcmToken) {
       sendNotification({
         to: doctor.fcmToken,
         notification: {
@@ -291,6 +372,33 @@ router.put("/appointments/add", verifyJWT, async (req, res) => {
     });
     await appointment.save();
 
+    const settings = await Setting.findOne();
+    if (settings && settings.appointmentNotifications) {
+      const notification = new Notification({
+        type: "appointment",
+        user: "medical-centre",
+        name: `${req.student.firstName} ${req.student.lastName}`,
+        image: req.student.image,
+        title: "New appointment",
+        content: description,
+      });
+      await notification.save();
+    }
+
+    const doctor = await Doctor.findOne({});
+    if (doctor && doctor.fcmToken) {
+      sendNotification({
+        to: doctor.fcmToken,
+        notification: {
+          title: "New appointment",
+          body: `${req.student.firstName}: ${description}`,
+        },
+        data: {
+          task: "appointment",
+        },
+      });
+    }
+
     res.json({
       status: "success",
       message: "Appointment added successful.",
@@ -367,6 +475,63 @@ router.get("/appointments/free-slots", async (req, res) => {
     });
   }
 });
+
+// #endregion
+
+// #region health records
+
+router.get("/health-records", verifyJWT, async (req, res) => {
+  try {
+    const records = await HealthRecord.find({ studentId: req.student._id });
+    const doctor = await Doctor.findOne();
+
+    res.json({
+      status: "success",
+      records: records,
+      doctor: doctor,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
+
+// #region settings
+
+router.get("/settings", verifyJWT, (req, res) => {
+  res.json({
+    status: "success",
+    emergencyNotifications: req.student.emergencyNotifications,
+  });
+});
+
+router.put(
+  "/settings/toggle/emergency-notifications",
+  verifyJWT,
+  (req, res) => {
+    try {
+      req.student.emergencyNotifications = !req.student.emergencyNotifications;
+      req.student.save();
+
+      res.json({
+        status: "success",
+        message: "Emergency notification changed successful.",
+        emergencyNotifications: req.student.emergencyNotifications,
+      });
+    } catch (error) {
+      res.status(ec.serverError).json({
+        status: "error",
+        message: "Something went wrong.",
+        error: error.message,
+      });
+    }
+  }
+);
 
 // #endregion
 

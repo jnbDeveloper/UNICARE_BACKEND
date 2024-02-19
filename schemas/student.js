@@ -118,6 +118,10 @@ const studentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    emergencyNotifications: {
+      type: Boolean,
+      default: false,
+    },
     createdAt: {
       type: Date,
       immutable: true,

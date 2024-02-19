@@ -15,6 +15,9 @@ const Doctor = require("../schemas/doctor");
 const Message = require("../schemas/message");
 const Appointment = require("../schemas/appointment");
 const HealthRecord = require("../schemas/health-record");
+const Setting = require("../schemas/setting");
+const TimeSlot = require("../schemas/timeslot");
+const Notification = require("../schemas/notification");
 
 const sendNotification = async (
   body = {
@@ -80,6 +83,47 @@ const verifyJWT = (req, res, next) => {
     });
   }
 };
+
+// #region navigation drawer
+
+router.get("/", verifyJWT, async (req, res) => {
+  try {
+    const notifications = await Notification.find({ user: "medical-centre" })
+      .limit(50)
+      .sort({ createdAt: 1 });
+
+    res.json({
+      status: "success",
+      doctor: req.doctor,
+      notifications: notifications,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+router.post("/notifications", verifyJWT, async (req, res) => {
+  try {
+    await Notification.deleteMany({ user: "medical-centre" });
+
+    res.json({
+      status: "success",
+      message: "Notifications deleted successful.",
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
 
 // #region home
 
@@ -276,6 +320,7 @@ router.put("/home/status", verifyJWT, async (req, res) => {
       },
       data: {
         task: "online",
+        online: req.doctor.online,
       },
     });
 
@@ -538,6 +583,19 @@ router.post("/emergency/send-message", verifyJWT, async (req, res) => {
           createdAt: message.createdAt,
         },
       });
+    }
+
+    if (student.emergencyNotifications) {
+      const notification = new Notification({
+        type: "emergency",
+        user: "student",
+        studentId: studentId,
+        name: `${req.doctor.firstName} ${req.doctor.lastName}`,
+        image: req.doctor.image,
+        title: "Emergency message",
+        content: text,
+      });
+      await notification.save();
     }
 
     res.json({
@@ -1129,6 +1187,299 @@ router.get("/check-patient/records", verifyJWT, async (req, res) => {
     });
   }
 });
+
+// #endregion
+
+// #region analisys
+
+router.get("/analysis", verifyJWT, async (req, res) => {
+  const currentYear = parseInt(dayjs().format("YYYY"));
+
+  try {
+    const chart1 = await HealthRecord.aggregate([
+      {
+        $match: {
+          $expr: {
+            $eq: [{ $year: "$createdAt" }, currentYear],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$disease",
+          students: { $addToSet: "$studentId" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          disease: "$_id",
+          count: {
+            $size: "$students",
+          },
+        },
+      },
+    ]);
+
+    const chart2 = await Student.aggregate([
+      {
+        $lookup: {
+          from: "healthrecords",
+          localField: "_id",
+          foreignField: "studentId",
+          as: "records",
+        },
+      },
+      {
+        $lookup: {
+          from: "faculties",
+          localField: "faculty",
+          foreignField: "_id",
+          as: "faculty",
+        },
+      },
+      {
+        $unwind: "$records",
+      },
+      {
+        $unwind: "$faculty",
+      },
+      {
+        $group: {
+          _id: {
+            faculty: "$faculty",
+            year: { $year: "$records.createdAt" },
+          },
+          students: { $addToSet: "$_id" },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.faculty._id",
+          faculty: { $first: "$_id.faculty.name" },
+          years: {
+            $push: {
+              year: "$_id.year",
+              count: { $size: "$students" },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          faculty: 1,
+          years: {
+            $map: {
+              input: { $range: [currentYear - 4, currentYear + 1] },
+              as: "year",
+              in: {
+                year: "$$year",
+                count: {
+                  $cond: {
+                    if: { $in: ["$$year", "$years.year"] },
+                    then: {
+                      $let: {
+                        vars: {
+                          filteredYear: {
+                            $arrayElemAt: [
+                              {
+                                $filter: {
+                                  input: "$years",
+                                  as: "yearData",
+                                  cond: { $eq: ["$$yearData.year", "$$year"] },
+                                },
+                              },
+                              0,
+                            ],
+                          },
+                        },
+                        in: "$$filteredYear.count",
+                      },
+                    },
+                    else: 0,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    const chart3 = await HealthRecord.aggregate([
+      {
+        $match: {
+          $expr: {
+            $eq: [{ $year: "$createdAt" }, currentYear],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$studentId",
+        },
+      },
+      {
+        $lookup: {
+          from: "students",
+          localField: "_id",
+          foreignField: "_id",
+          as: "student",
+        },
+      },
+      {
+        $unwind: "$student",
+      },
+      {
+        $group: {
+          _id: "$student.faculty",
+          male: {
+            $sum: {
+              $cond: {
+                if: {
+                  $eq: ["$student.gender", "male"],
+                },
+                then: 1,
+                else: 0,
+              },
+            },
+          },
+          female: {
+            $sum: {
+              $cond: {
+                if: {
+                  $eq: ["$student.gender", "female"],
+                },
+                then: 1,
+                else: 0,
+              },
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "faculties",
+          localField: "_id",
+          foreignField: "_id",
+          as: "faculty",
+        },
+      },
+      {
+        $unwind: "$faculty",
+      },
+      {
+        $project: {
+          _id: 0,
+          faculty: "$faculty.name",
+          male: 1,
+          female: 1,
+        },
+      },
+    ]);
+
+    res.json({
+      status: "success",
+      chart1: chart1,
+      chart2: chart2,
+      chart3: chart3,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+// #endregion
+
+// #region settings
+
+router.get("/settings", verifyJWT, async (req, res) => {
+  try {
+    const slots = await TimeSlot.find({}).sort({ startTime: 1 });
+    const settings = await Setting.findOne();
+
+    res.json({
+      status: "success",
+      slots: slots,
+      settings: settings,
+    });
+  } catch (error) {
+    res.status(ec.serverError).json({
+      status: "error",
+      message: "Something went wrong.",
+      error: error.message,
+    });
+  }
+});
+
+router.put(
+  "/settings/toggle/appointment-notifications",
+  verifyJWT,
+  async (req, res) => {
+    try {
+      const settings = await Setting.findOne();
+
+      if (settings) {
+        settings.appointmentNotifications = !settings.appointmentNotifications;
+        settings.save();
+
+        res.json({
+          status: "success",
+          message: "Appointment notification settings changed successful.",
+          appointmentNotifications: settings.appointmentNotifications,
+        });
+      } else {
+        res.status(ec.notFound).json({
+          status: "error",
+          message: "Settings not found.",
+        });
+      }
+    } catch (error) {
+      res.status(ec.serverError).json({
+        status: "error",
+        message: "Something went wrong.",
+        error: error.message,
+      });
+    }
+  }
+);
+
+router.put(
+  "/settings/toggle/emergency-notifications",
+  verifyJWT,
+  async (req, res) => {
+    try {
+      const settings = await Setting.findOne();
+
+      if (settings) {
+        settings.emergencyNotifications = !settings.emergencyNotifications;
+        settings.save();
+
+        res.json({
+          status: "success",
+          message: "Emergency notification settings changed successful.",
+          emergencyNotifications: settings.emergencyNotifications,
+        });
+      } else {
+        res.status(ec.notFound).json({
+          status: "error",
+          message: "Settings not found.",
+        });
+      }
+    } catch (error) {
+      res.status(ec.serverError).json({
+        status: "error",
+        message: "Something went wrong.",
+        error: error.message,
+      });
+    }
+  }
+);
 
 // #endregion
 
